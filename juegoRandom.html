@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Snake & Lucho: Auditoría Final</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #0f0c29;
+            color: white;
+            font-family: 'Segoe UI', Arial, sans-serif;
+            overflow: hidden;
+        }
+        #game-container { position: relative; }
+        canvas {
+            border: 5px solid #5433ff;
+            background-color: #16213e;
+            box-shadow: 0 0 25px rgba(84, 51, 255, 0.5);
+        }
+        .stats { margin-bottom: 10px; font-size: 18px; text-align: center; width: 400px; }
+        .hp-bar { height: 10px; background: #444; margin: 5px 0; border-radius: 5px; overflow: hidden; }
+        #lucho-hp { background: #00ff00; width: 100%; height: 100%; transition: 0.2s; }
+        #cerdito-hp { background: #ff00ff; width: 100%; height: 100%; transition: 0.2s; }
+        
+        #overlay {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 20px;
+            box-sizing: border-box;
+            z-index: 10;
+        }
+        #overlay h2 { color: #ffcc00; margin-bottom: 10px; }
+        #overlay p { font-size: 18px; margin-bottom: 20px; }
+        #btn-restart {
+            padding: 12px 25px;
+            font-size: 16px;
+            font-weight: bold;
+            color: white;
+            background: #5433ff;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: 0.3s;
+        }
+        #btn-restart:hover { background: #a533ff; transform: scale(1.1); }
+        #timer-display { font-size: 14px; color: #ff4d4d; }
+    </style>
+</head>
+<body>
+
+    <div class="stats">
+        <div id="game-title">MODO: SNAKE 🐍</div>
+        <div id="lucho-ui" style="display:none">
+            VIDA LUCHO: <div class="hp-bar"><div id="lucho-hp"></div></div>
+            VIDA CERDITO: <div class="hp-bar"><div id="cerdito-hp"></div></div>
+        </div>
+        Puntaje: <span id="score">0</span> <br>
+        <span id="timer-display">Ratón huye en: <span id="mouse-timer">6</span>s</span>
+    </div>
+
+    <div id="game-container">
+        <canvas id="gameCanvas" width="400" height="400"></canvas>
+        <div id="overlay">
+            <h2 id="end-title"></h2>
+            <p id="end-msg"></p>
+            <button id="btn-restart" onclick="resetGame()">JUGAR DE NUEVO</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+        const scoreElement = document.getElementById("score");
+        const titleElement = document.getElementById("game-title");
+        const luchoUI = document.getElementById("lucho-ui");
+        const overlay = document.getElementById("overlay");
+        const endTitle = document.getElementById("end-title");
+        const endMsg = document.getElementById("end-msg");
+        const mouseTimerElement = document.getElementById("mouse-timer");
+
+        const gridSize = 20;
+        let score, gameMode, snake, dx, dy, mouse, rock, cat, mouseTimer, catSpeedCounter;
+        let lucho, cerdito, balas, normasISO, gameLoop, systemInterval;
+        const listaISO = ["ISO 9001", "ISO 14001", "ISO 27001", "ISO 45001"];
+
+        function init() {
+            // Reinicio de variables lógicas
+            score = 0;
+            gameMode = "SNAKE";
+            snake = [{x: 160, y: 160}, {x: 140, y: 160}];
+            dx = gridSize; dy = 0;
+            mouse = {x: 100, y: 100}; rock = {x: 200, y: 200};
+            cat = {x: -100, y: -100, active: false};
+            mouseTimer = 6;
+            catSpeedCounter = 0;
+
+            lucho = { x: 180, y: 350, hp: 10, maxHp: 10 };
+            cerdito = { x: 200, y: 30, dir: 2, hp: 5, maxHp: 5 };
+            balas = []; normasISO = [];
+            
+            // Reinicio visual de la interfaz
+            scoreElement.innerText = "0";
+            mouseTimerElement.innerText = "6";
+            titleElement.innerText = "MODO: SNAKE 🐍";
+            document.getElementById("timer-display").style.display = "inline";
+            luchoUI.style.display = "none";
+            overlay.style.display = "none";
+
+            // CORRECCIÓN: Resetear barras de vida al 100%
+            document.getElementById("lucho-hp").style.width = "100%";
+            document.getElementById("cerdito-hp").style.width = "100%";
+            
+            if (gameLoop) cancelAnimationFrame(gameLoop);
+            if (gameLoop && typeof gameLoop === "number") clearTimeout(gameLoop);
+            if (systemInterval) clearInterval(systemInterval);
+
+            // Intervalo de lógica de tiempo para el ratón
+            systemInterval = setInterval(() => {
+                if (gameMode === "SNAKE") {
+                    mouseTimer--;
+                    if (mouseTimer <= 0) createMouse();
+                    mouseTimerElement.innerText = mouseTimer;
+                }
+            }, 1000);
+
+            // Aparición del Gato
+            setInterval(() => {
+                if (gameMode === "SNAKE" && !cat.active) spawnCat();
+            }, 15000);
+
+            main();
+        }
+
+        function main() {
+            if (gameMode === "SNAKE") {
+                if (didSnakeDie()) return showEnd("¡GAME OVER!", "Chocaste contra un obstáculo.");
+                gameLoop = setTimeout(() => {
+                    updateSnake();
+                    moveCat();
+                    drawSnakeScene();
+                    main();
+                }, 100);
+            } else {
+                updateLuchoMode();
+                drawLuchoScene();
+                if (lucho.hp <= 0) return showEnd("¡AUDITORÍA FALLIDA!", "Lucho no soportó las normas ISO.");
+                if (cerdito.hp <= 0) return showEnd("¡VICTORIA!", "El Cerdito ha sido auditado y Lucho es el nuevo Jefe de Calidad.");
+                gameLoop = requestAnimationFrame(main);
+            }
+        }
+
+        function createMouse() {
+            mouse = {x: randomPos(), y: randomPos()};
+            mouseTimer = 6;
+        }
+
+        function spawnCat() {
+            cat.x = randomPos();
+            cat.y = (Math.random() > 0.5) ? 0 : 380;
+            cat.active = true;
+        }
+
+        function moveCat() {
+            if (!cat.active) return;
+            catSpeedCounter++;
+            if (catSpeedCounter >= 3) {
+                if (cat.x < mouse.x) cat.x += gridSize;
+                else if (cat.x > mouse.x) cat.x -= gridSize;
+                if (cat.y < mouse.y) cat.y += gridSize;
+                else if (cat.y > mouse.y) cat.y -= gridSize;
+                catSpeedCounter = 0;
+            }
+            if (cat.x === mouse.x && cat.y === mouse.y) {
+                cat.active = false;
+                cat.x = -100;
+                createMouse();
+            }
+        }
+
+        function updateSnake() {
+            const head = {x: snake[0].x + dx, y: snake[0].y + dy};
+            snake.unshift(head);
+            if (head.x === mouse.x && head.y === mouse.y) {
+                score += 10;
+                scoreElement.innerText = score;
+                createMouse();
+                rock = {x: randomPos(), y: randomPos()};
+                cat.active = false; 
+                if (score >= 50) {
+                    gameMode = "LUCHO";
+                    luchoUI.style.display = "block";
+                    document.getElementById("timer-display").style.display = "none";
+                    titleElement.innerText = "BOSS FIGHT: LUCHO VS CERDITO";
+                    clearInterval(systemInterval);
+                }
+            } else { snake.pop(); }
+        }
+
+        function updateLuchoMode() {
+            cerdito.x += cerdito.dir;
+            if (cerdito.x > 370 || cerdito.x < 0) cerdito.dir *= -1;
+            
+            if (Math.random() < 0.03) {
+                normasISO.push({x: cerdito.x + 5, y: cerdito.y + 20, txt: listaISO[Math.floor(Math.random()*listaISO.length)]});
+            }
+            
+            balas.forEach((b, i) => {
+                b.y -= 7;
+                if (b.y < 0) balas.splice(i, 1);
+                if (b.y < cerdito.y + 30 && b.y > cerdito.y && b.x > cerdito.x && b.x < cerdito.x + 30) {
+                    balas.splice(i, 1);
+                    cerdito.hp--;
+                    document.getElementById("cerdito-hp").style.width = (cerdito.hp / cerdito.maxHp * 100) + "%";
+                }
+            });
+            
+            normasISO.forEach((iso, i) => {
+                iso.y += 3;
+                if (iso.y > 400) normasISO.splice(i, 1);
+                if (iso.y > lucho.y && iso.y < lucho.y + 30 && iso.x > lucho.x && iso.x < lucho.x + 30) {
+                    normasISO.splice(i, 1);
+                    lucho.hp--;
+                    document.getElementById("lucho-hp").style.width = (lucho.hp / lucho.maxHp * 100) + "%";
+                }
+            });
+        }
+
+        function drawSnakeScene() {
+            ctx.fillStyle = "#16213e"; ctx.fillRect(0,0,400,400);
+            ctx.fillStyle = "#4ecca3"; snake.forEach(p => ctx.fillRect(p.x, p.y, 18, 18));
+            ctx.font = "18px Arial"; 
+            ctx.fillText("🐭", mouse.x, mouse.y+16);
+            ctx.fillText("🪨", rock.x, rock.y+16);
+            if(cat.active) ctx.fillText("🐱", cat.x, cat.y+16);
+        }
+
+        function drawLuchoScene() {
+            ctx.fillStyle = "#1a1a2e"; ctx.fillRect(0,0,400,400);
+            ctx.font = "30px Arial"; ctx.fillText("👨‍✈️", lucho.x, lucho.y + 25);
+            ctx.fillText("🐷", cerdito.x, cerdito.y + 25);
+            ctx.fillStyle = "#00fbff"; balas.forEach(b => ctx.fillRect(b.x, b.y, 4, 10));
+            ctx.fillStyle = "#ff4d4d"; ctx.font = "bold 11px Arial";
+            normasISO.forEach(iso => ctx.fillText(iso.txt, iso.x, iso.y));
+        }
+
+        function didSnakeDie() {
+            return snake[0].x < 0 || snake[0].x >= 400 || snake[0].y < 0 || snake[0].y >= 400 || (snake[0].x === rock.x && snake[0].y === rock.y);
+        }
+
+        function showEnd(title, message) {
+            endTitle.innerText = title;
+            endMsg.innerText = message;
+            overlay.style.display = "flex";
+            if (systemInterval) clearInterval(systemInterval);
+        }
+
+        function resetGame() { init(); }
+
+        function randomPos() { return Math.floor(Math.random() * 20) * 20; }
+
+        document.addEventListener("keydown", (e) => {
+            if (overlay.style.display === "flex") return;
+            if (gameMode === "SNAKE") {
+                if (e.keyCode === 37 && dx === 0) { dx = -20; dy = 0; }
+                if (e.keyCode === 38 && dy === 0) { dx = 0; dy = -20; }
+                if (e.keyCode === 39 && dx === 0) { dx = 20; dy = 0; }
+                if (e.keyCode === 40 && dy === 0) { dx = 0; dy = 20; }
+            } else {
+                if (e.keyCode === 37 && lucho.x > 0) lucho.x -= 20;
+                if (e.keyCode === 39 && lucho.x < 370) lucho.x += 20;
+                if (e.keyCode === 32) balas.push({x: lucho.x + 12, y: lucho.y});
+            }
+        });
+
+        init();
+    </script>
+</body>
+</html>
